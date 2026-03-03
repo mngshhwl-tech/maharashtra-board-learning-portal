@@ -1,0 +1,315 @@
+<script>
+  const state = {
+    selectedClass: '',
+    selectedSubject: '',
+    selectedChapter: '',
+    chapterData: null,
+    mcqScore: { total: 0, correct: 0 }
+  };
+
+  document.addEventListener('DOMContentLoaded', initPortal);
+
+  function initPortal() {
+    wireTabSwitching();
+    loadClasses();
+
+    document.getElementById('classSelect').addEventListener('change', onClassChange);
+    document.getElementById('subjectSelect').addEventListener('change', onSubjectChange);
+    document.getElementById('chapterSelect').addEventListener('change', onChapterChange);
+  }
+
+  function loadClasses() {
+    google.script.run
+      .withSuccessHandler((classes) => {
+        fillSelect('classSelect', classes.map((cls) => ({ value: cls, label: `Class ${cls}` })), 'Select Class');
+      })
+      .withFailureHandler(showError)
+      .getClasses();
+  }
+
+  function onClassChange(e) {
+    state.selectedClass = e.target.value;
+    state.selectedSubject = '';
+    state.selectedChapter = '';
+
+    fillSelect('subjectSelect', [], 'Select Subject', true);
+    fillSelect('chapterSelect', [], 'Select Chapter', true);
+    hideChapterPage();
+
+    if (!state.selectedClass) return;
+
+    google.script.run
+      .withSuccessHandler((subjects) => {
+        fillSelect('subjectSelect', subjects.map((sub) => ({ value: sub, label: sub })), 'Select Subject');
+      })
+      .withFailureHandler(showError)
+      .getSubjectsForClass(state.selectedClass);
+  }
+
+  function onSubjectChange(e) {
+    state.selectedSubject = e.target.value;
+    state.selectedChapter = '';
+
+    fillSelect('chapterSelect', [], 'Select Chapter', true);
+    hideChapterPage();
+
+    if (!state.selectedSubject) return;
+
+    google.script.run
+      .withSuccessHandler((chapters) => {
+        fillSelect(
+          'chapterSelect',
+          chapters.map((ch) => ({ value: ch.chapter, label: ch.chapter })),
+          'Select Chapter'
+        );
+      })
+      .withFailureHandler(showError)
+      .getChapters(state.selectedClass, state.selectedSubject);
+  }
+
+  function onChapterChange(e) {
+    state.selectedChapter = e.target.value;
+    hideChapterPage();
+
+    if (!state.selectedChapter) return;
+
+    google.script.run
+      .withSuccessHandler((bundle) => {
+        state.chapterData = bundle;
+        renderChapter();
+      })
+      .withFailureHandler(showError)
+      .getChapterBundle(state.selectedClass, state.selectedSubject, state.selectedChapter);
+  }
+
+  function fillSelect(id, items, placeholder, disable = false) {
+    const select = document.getElementById(id);
+    select.innerHTML = `<option value="">${placeholder}</option>`;
+
+    items.forEach((item) => {
+      const opt = document.createElement('option');
+      opt.value = item.value;
+      opt.textContent = item.label;
+      select.appendChild(opt);
+    });
+
+    select.disabled = disable || items.length === 0;
+  }
+
+  function renderChapter() {
+    document.getElementById('chapterPage').classList.remove('hidden');
+    document.getElementById('chapterTitle').textContent = state.selectedChapter;
+    document.getElementById('chapterMeta').textContent = `Class ${state.selectedClass} • ${state.selectedSubject}`;
+
+    renderLearn(state.chapterData.learn || []);
+    renderPractice(state.chapterData.practice || []);
+    renderExperiment(state.chapterData.experiment || []);
+    renderRevision(state.chapterData.revision || []);
+
+    document.querySelectorAll('.tab-btn').forEach((btn, i) => {
+      btn.classList.toggle('active', i === 0);
+    });
+    document.querySelectorAll('.tab-panel').forEach((panel, i) => {
+      panel.classList.toggle('hidden', i !== 0);
+    });
+  }
+
+  function renderLearn(items) {
+    const panel = document.getElementById('learnTab');
+    panel.innerHTML = '';
+
+    if (!items.length) {
+      panel.innerHTML = '<p>No Learn content found for this chapter.</p>';
+      return;
+    }
+
+    items.forEach((item) => {
+      if (item.contentType.toLowerCase() === 'iframe' && item.resourceURL) {
+        panel.insertAdjacentHTML('beforeend', `
+          <div class="block iframe-wrap">
+            <p><strong>${escapeHtml(item.question)}</strong></p>
+            <iframe src="${item.resourceURL}" loading="lazy" allowfullscreen></iframe>
+            <p>${escapeHtml(item.explanation)}</p>
+          </div>
+        `);
+      } else {
+        panel.insertAdjacentHTML('beforeend', `
+          <div class="block">
+            <p><strong>${escapeHtml(item.question)}</strong></p>
+            <p>${escapeHtml(item.explanation)}</p>
+          </div>
+        `);
+      }
+    });
+  }
+
+  function renderPractice(items) {
+    const panel = document.getElementById('practiceTab');
+    panel.innerHTML = '';
+    state.mcqScore = { total: 0, correct: 0 };
+
+    if (!items.length) {
+      panel.innerHTML = '<p>No Practice content found for this chapter.</p>';
+      return;
+    }
+
+    const scoreBox = document.createElement('div');
+    scoreBox.className = 'score-box';
+    scoreBox.id = 'scoreBox';
+    scoreBox.textContent = 'Score: 0 / 0';
+    panel.appendChild(scoreBox);
+
+    items.forEach((item, idx) => {
+      const type = (item.contentType || '').toLowerCase();
+      if (type === 'mcq') {
+        state.mcqScore.total += 1;
+        panel.appendChild(buildMcqCard(item, idx));
+      } else {
+        panel.insertAdjacentHTML('beforeend', `
+          <div class="question-card">
+            <p><strong>${type === 'numerical' ? 'Numerical' : 'Question'}:</strong> ${escapeHtml(item.question)}</p>
+            <p><strong>Answer:</strong> ${escapeHtml(item.correctAnswer)}</p>
+            <p><strong>Explanation:</strong> ${escapeHtml(item.explanation)}</p>
+          </div>
+        `);
+      }
+    });
+
+    updateScore();
+  }
+
+  function buildMcqCard(item, idx) {
+    const tpl = document.getElementById('mcqTemplate').content.cloneNode(true);
+    const card = tpl.querySelector('.question-card');
+    const qText = tpl.querySelector('.q-text');
+    const optionsWrap = tpl.querySelector('.options');
+    const checkBtn = tpl.querySelector('.check-btn');
+    const feedback = tpl.querySelector('.feedback');
+
+    qText.textContent = `Q${idx + 1}. ${item.question}`;
+
+    item.options.forEach((opt, i) => {
+      const optId = `q${idx}_opt${i}`;
+      optionsWrap.insertAdjacentHTML('beforeend', `
+        <label for="${optId}">
+          <input type="radio" name="q${idx}" id="${optId}" value="${escapeAttr(opt)}"> ${escapeHtml(opt)}
+        </label>
+      `);
+    });
+
+    let attempted = false;
+    checkBtn.addEventListener('click', () => {
+      const picked = card.querySelector(`input[name="q${idx}"]:checked`);
+      if (!picked) {
+        feedback.textContent = 'Please select an option.';
+        feedback.className = 'feedback bad';
+        return;
+      }
+
+      const isCorrect = picked.value.trim() === String(item.correctAnswer).trim();
+      if (!attempted && isCorrect) state.mcqScore.correct += 1;
+
+      attempted = true;
+      feedback.textContent = isCorrect
+        ? `Correct! ${item.explanation || ''}`
+        : `Incorrect. Correct answer: ${item.correctAnswer}. ${item.explanation || ''}`;
+      feedback.className = `feedback ${isCorrect ? 'good' : 'bad'}`;
+      updateScore();
+    });
+
+    return card;
+  }
+
+  function updateScore() {
+    const scoreBox = document.getElementById('scoreBox');
+    if (scoreBox) {
+      scoreBox.textContent = `Score: ${state.mcqScore.correct} / ${state.mcqScore.total}`;
+    }
+  }
+
+  function renderExperiment(items) {
+    const panel = document.getElementById('experimentTab');
+    panel.innerHTML = '';
+
+    if (!items.length) {
+      panel.innerHTML = '<p>No Experiment content found for this chapter.</p>';
+      return;
+    }
+
+    items.forEach((item) => {
+      const ctype = (item.contentType || '').toLowerCase();
+
+      if (ctype === 'iframe') {
+        panel.insertAdjacentHTML('beforeend', `
+          <div class="block iframe-wrap">
+            <p><strong>Simulation:</strong> ${escapeHtml(item.question)}</p>
+            <iframe src="${item.resourceURL}" loading="lazy" allowfullscreen></iframe>
+            <p>${escapeHtml(item.explanation)}</p>
+          </div>
+        `);
+      } else {
+        panel.insertAdjacentHTML('beforeend', `
+          <div class="block">
+            <p><strong>${escapeHtml(item.question)}</strong></p>
+            <p>${escapeHtml(item.explanation)}</p>
+          </div>
+        `);
+      }
+    });
+  }
+
+  function renderRevision(items) {
+    const panel = document.getElementById('revisionTab');
+    panel.innerHTML = '';
+
+    if (!items.length) {
+      panel.innerHTML = '<p>No Revision content found for this chapter.</p>';
+      return;
+    }
+
+    items.forEach((item) => {
+      panel.insertAdjacentHTML('beforeend', `
+        <div class="block">
+          <p><strong>${escapeHtml(item.question)}</strong></p>
+          <p>${escapeHtml(item.explanation)}</p>
+        </div>
+      `);
+    });
+  }
+
+  function wireTabSwitching() {
+    document.querySelectorAll('.tab-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.tab-btn').forEach((b) => b.classList.remove('active'));
+        btn.classList.add('active');
+
+        const target = btn.dataset.tab;
+        document.querySelectorAll('.tab-panel').forEach((panel) => {
+          panel.classList.toggle('hidden', panel.id !== target);
+        });
+      });
+    });
+  }
+
+  function hideChapterPage() {
+    document.getElementById('chapterPage').classList.add('hidden');
+  }
+
+  function showError(err) {
+    console.error(err);
+    alert('Something went wrong while loading data. Check Sheet ID and sheet structure.');
+  }
+
+  function escapeHtml(str = '') {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  function escapeAttr(str = '') {
+    return escapeHtml(str).replace(/`/g, '&#096;');
+  }
+</script>
