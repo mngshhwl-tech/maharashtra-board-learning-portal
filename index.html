@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <?!= include('style'); ?>
+  </head>
+  <body>
+    <header class="topbar">
+      <h1>Maharashtra Board Learning Portal</h1>
+      <p>Class 8–10 • Science & Mathematics • Learn + Practice + Virtual Lab</p>
+    </header>
+
+    <main class="container">
+      <section class="card flow-card">
+        <div class="flow-grid">
+          <div>
+            <label for="classSelect">Class</label>
+            <select id="classSelect">
+              <option value="">Select Class</option>
+            </select>
+          </div>
+
+          <div>
+            <label for="subjectSelect">Subject</label>
+            <select id="subjectSelect" disabled>
+              <option value="">Select Subject</option>
+            </select>
+          </div>
+
+          <div>
+            <label for="chapterSelect">Chapter</label>
+            <select id="chapterSelect" disabled>
+              <option value="">Select Chapter</option>
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <section id="chapterPage" class="card hidden">
+        <div class="chapter-header">
+          <h2 id="chapterTitle">Chapter</h2>
+          <p id="chapterMeta"></p>
+        </div>
+
+        <div class="tabs">
+          <button class="tab-btn active" data-tab="learnTab">Learn</button>
+          <button class="tab-btn" data-tab="practiceTab">Practice</button>
+          <button class="tab-btn" data-tab="experimentTab">Experiment</button>
+          <button class="tab-btn" data-tab="revisionTab">Revision</button>
+        </div>
+
+        <div id="learnTab" class="tab-panel"></div>
+        <div id="practiceTab" class="tab-panel hidden"></div>
+        <div id="experimentTab" class="tab-panel hidden"></div>
+        <div id="revisionTab" class="tab-panel hidden"></div>
+      </section>
+    </main>
+
+    <template id="mcqTemplate">
+      <div class="question-card">
+        <p class="q-text"></p>
+        <div class="options"></div>
+        <button class="check-btn">Check Answer</button>
+        <p class="feedback"></p>
+      </div>
+    </template>
+
+    <?!= include('script'); ?>
+  </body>
+</html>
